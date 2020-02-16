@@ -174,18 +174,14 @@ class PCA:
     def transform(self):
         return self.vposterior.z_expt
 
-    def inverse_transform(self, resample=False):
-
-        if resample:
-            return self.generator.sample_mean({"z": self.vposterior.z_expt})
-
-        return self.vposterior.z_expt @ self.generator.W.T
+    def inverse_transform(self):
+        return self.generator.sample_mean({"z": self.vposterior.z_expt})
 
 
 if __name__ == "__main__":
     x_dim = 3
     z_dim = 2
-    n_dim = 10
+    n_dim = 5
     pca = PCA(x_dim, z_dim, n_dim)
     x = torch.randn(n_dim, x_dim)
 
@@ -193,11 +189,10 @@ if __name__ == "__main__":
 
     # Inference
     pca.inference({"x": x})
-    pca.transform()
+    print(pca.transform())
 
     # Sample
-    pca.inverse_transform()
-    pca.inverse_transform(resample=True)
+    print(pca.inverse_transform())
 
     # Model evidence
     print(pca.evidence({"x": x}))

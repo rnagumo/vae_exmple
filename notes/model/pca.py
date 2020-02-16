@@ -30,7 +30,7 @@ class Generator(pxd.Normal):
         super().__init__(cond_var=["z"], var=["x"])
 
         self.x_dim = x_dim
-        self.W = torch.ones(x_dim, z_dim)
+        self.W = torch.randn(x_dim, z_dim)
         self.sigma = torch.ones(1)
 
     def forward(self, z):
@@ -69,6 +69,20 @@ class Generator(pxd.Normal):
                       * (torch.trace(x @ x.T) - 2 * z_W_x + tr_zz_WW))
 
 
+class Posterior(MultivariateNormal):
+
+    def __init__(self, x_dim, generator):
+        super().__init__(var=["x"])
+
+        self.x_dim = x_dim
+        self.generator = generator
+
+    def forward(self):
+        cov = (self.generator.sigma * torch.eye(self.x_dim)
+               + self.generator.W @ self.generator.W.T)
+        return {"loc": torch.zeros(self.x_dim), "covariance_matrix": cov}
+
+
 class VarationalPosterior(MultivariateNormal):
 
     def __init__(self, z_dim, n_dim):
@@ -83,8 +97,8 @@ class VarationalPosterior(MultivariateNormal):
         self.Sigma = torch.eye(z_dim, z_dim)
 
         # Expectations
-        self.z_expt = torch.ones(n_dim, z_dim)
-        self.zz_expt = torch.stack([torch.eye(z_dim)])
+        self.z_expt = torch.randn(n_dim, z_dim)
+        self.zz_expt = self.z_expt.T @ self.z_expt
 
     def forward(self):
         return {"loc": self.mu,
@@ -116,33 +130,45 @@ class PCA:
         self.z_dim = z_dim
         self.n_dim = n_dim
 
+        # Generative model
+        self.prior = pxd.Normal(var=["z"], features_shape=[z_dim],
+                                loc=torch.tensor(0.), scale=torch.tensor(1.))
         self.generator = Generator(z_dim, x_dim)
+        self.posterior = Posterior(x_dim, self.generator)
+
+        # Variational model
         self.vposterior = VarationalPosterior(z_dim, n_dim)
 
-    def sample(self, x_dict={}, n_dim=None):
+    def sample(self, n_dim=None, variational=True):
 
         if n_dim is None:
             n_dim = self.n_dim
 
-        if x_dict:
-            # Reconstruction
+        if variational:
+            # Sample from variatinal prior
             prior = self.vposterior
         else:
             # Standard Normal distribution
-            prior = pxd.Normal(
-                var=["z"], loc=torch.tensor(0.),  scale=torch.tensor(1.),
-                features_shape=[self.z_dim])
+            prior = self.prior
 
-        return (self.generator * prior).sample(x_dict=x_dict, batch_n=n_dim)
+        return (self.generator * prior).sample(batch_n=n_dim)
 
     def inference(self, x_dict, max_iter=50):
 
+        evidence_list = []
         for _ in range(max_iter):
+            # Maximize ELBO
+            self.generator.inference(x_dict["x"], self.vposterior)
+
             # Minimize KL-divergence
             self.vposterior.inference(x_dict["x"], self.generator)
 
-            # Maximize ELBO
-            self.generator.inference(x_dict["x"], self.vposterior)
+            evidence_list.append(self.evidence(x_dict))
+
+        return evidence_list
+
+    def evidence(self, x_dict):
+        return self.posterior.get_log_prob(x_dict).mean()
 
 
 if __name__ == "__main__":
@@ -152,9 +178,12 @@ if __name__ == "__main__":
     pca = PCA(x_dim, z_dim, n_dim)
     x = torch.randn(n_dim, x_dim)
 
+    print(pca.sample(variational=False))
     print(pca.sample())
-    print(pca.sample({"x": x}))
 
     # Inference
     pca.inference({"x": x})
-    print(pca.sample({"x": x}))
+    print(pca.sample())
+
+    # Model evidence
+    print(pca.evidence({"x": x}))

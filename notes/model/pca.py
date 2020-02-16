@@ -51,19 +51,22 @@ class Generator(pxd.Normal):
         q : VariationalPosterior
         """
 
-        # Save original value
-        W = self.W.clone()
-
         # Update W
-        self.W = x.T @ q.z_expt @ q.zz_expt.inverse()
+        x_z = 0
+        for n in range(x.size(0)):
+            x_z += x[n].unsqueeze(1) @ q.z_expt[n].unsqueeze(0)
 
-        # Update Sigma
+        self.W = x_z @ q.zz_expt.sum(dim=0).inverse()
+
+        # Update sigma
         z_W_x = 0
         for n in range(q.z_expt.size(0)):
-            z_W_x += q.z_expt[n].unsqueeze(0) @ W.T @ x[n].unsqueeze(1)
+            z_W_x += q.z_expt[n].unsqueeze(0) @ self.W.T @ x[n].unsqueeze(1)
         z_W_x = z_W_x.squeeze()
 
-        tr_zz_WW = torch.trace(q.zz_expt @ W.T @ W)
+        tr_zz_WW = 0
+        for n in range(q.zz_expt.size(0)):
+            tr_zz_WW += torch.trace(q.zz_expt[n] @ self.W.T @ self.W)
 
         self.sigma = ((x.size(0) * x.size(1)) ** -1
                       * (torch.trace(x @ x.T) - 2 * z_W_x + tr_zz_WW))
@@ -98,7 +101,10 @@ class VarationalPosterior(MultivariateNormal):
 
         # Expectations
         self.z_expt = torch.randn(n_dim, z_dim)
-        self.zz_expt = self.z_expt.T @ self.z_expt
+        self.zz_expt = torch.zeros(n_dim, z_dim, z_dim)
+        for n in range(self.n_dim):
+            self.zz_expt[n] += (self.z_expt[n].unsqueeze(1)
+                                @ self.z_expt[n].unsqueeze(0))
 
     def forward(self):
         return {"loc": self.mu,
@@ -115,12 +121,16 @@ class VarationalPosterior(MultivariateNormal):
             p.sigma ** -1 * p.W.T @ p.W + torch.eye(self.z_dim)).inverse()
 
         for n in range(self.n_dim):
-            self.mu[n] = (p.sigma ** -1 * self.Sigma.inverse() @ p.W.T
+            self.mu[n] = (p.sigma ** -1 * self.Sigma @ p.W.T
                           @ x[n].unsqueeze(1)).T
 
         # Calculate expectations
         self.z_expt = self.mu.clone()
-        self.zz_expt = self.Sigma + self.z_expt.T @ self.z_expt
+
+        self.zz_expt = self.Sigma.expand(self.n_dim, -1, -1)
+        for n in range(self.n_dim):
+            self.zz_expt[n] += (self.z_expt[n].unsqueeze(1)
+                                @ self.z_expt[n].unsqueeze(0))
 
 
 class PCA:
@@ -139,29 +149,20 @@ class PCA:
         # Variational model
         self.vposterior = VarationalPosterior(z_dim, n_dim)
 
-    def sample(self, n_dim=None, variational=True):
+    def sample(self, n_sample):
+        z = self.prior.sample(batch_n=n_sample)
+        x = self.generator.sample_mean(z)
+        return x
 
-        if n_dim is None:
-            n_dim = self.n_dim
-
-        if variational:
-            # Sample from variatinal prior
-            prior = self.vposterior
-        else:
-            # Standard Normal distribution
-            prior = self.prior
-
-        return (self.generator * prior).sample(batch_n=n_dim)
-
-    def inference(self, x_dict, max_iter=50):
+    def inference(self, x_dict, max_iter=10):
 
         evidence_list = []
         for _ in range(max_iter):
-            # Maximize ELBO
-            self.generator.inference(x_dict["x"], self.vposterior)
-
-            # Minimize KL-divergence
+            # Minimize KL-divergence (E-step)
             self.vposterior.inference(x_dict["x"], self.generator)
+
+            # Maximize ELBO (M-step)
+            self.generator.inference(x_dict["x"], self.vposterior)
 
             evidence_list.append(self.evidence(x_dict))
 
@@ -178,12 +179,10 @@ if __name__ == "__main__":
     pca = PCA(x_dim, z_dim, n_dim)
     x = torch.randn(n_dim, x_dim)
 
-    print(pca.sample(variational=False))
-    print(pca.sample())
+    pca.sample(4)
 
     # Inference
     pca.inference({"x": x})
-    print(pca.sample())
 
     # Model evidence
     print(pca.evidence({"x": x}))

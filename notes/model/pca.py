@@ -171,6 +171,16 @@ class PCA:
     def evidence(self, x_dict):
         return self.posterior.get_log_prob(x_dict).mean()
 
+    def transform(self):
+        return self.vposterior.z_expt
+
+    def inverse_transform(self, resample=False):
+
+        if resample:
+            return self.generator.sample_mean({"z": self.vposterior.z_expt})
+
+        return self.vposterior.z_expt @ self.generator.W.T
+
 
 if __name__ == "__main__":
     x_dim = 3
@@ -183,6 +193,11 @@ if __name__ == "__main__":
 
     # Inference
     pca.inference({"x": x})
+    pca.transform()
+
+    # Sample
+    pca.inverse_transform()
+    pca.inverse_transform(resample=True)
 
     # Model evidence
     print(pca.evidence({"x": x}))

@@ -90,6 +90,6 @@ if __name__ == "__main__":
     # Sample from latent
     with torch.no_grad():
         prior, p, q = sampler
-        sample = (p * prior).sample(batch_n=100)
-        x_sample = p.sample_mean({"z": sample["z"]})
+        z_sample = prior.sample(batch_n=100)
+        x_sample = p.sample_mean({"z": z_sample["z"]})
         print(x_sample.size(), x_sample[0])

@@ -47,25 +47,38 @@ class Inference(pxd.Normal):
         return {"loc": loc, "scale": scale}
 
 
-def load_vae_model(x_dim, z_dim, h_dim):
+class VAE(pxm.Model):
+    def __init__(self, x_dim, z_dim, h_dim):
 
-    # Generative model
-    prior = pxd.Normal(loc=torch.tensor(0.), scale=torch.tensor(1.),
-                       var=["z"], features_shape=[z_dim])
-    decoder = Generator(z_dim, h_dim, x_dim)
+        # Generative model
+        self.prior = pxd.Normal(loc=torch.tensor(0.), scale=torch.tensor(1.),
+                                var=["z"], features_shape=[z_dim])
+        self.decoder = Generator(z_dim, h_dim, x_dim)
 
-    # Variational model
-    encoder = Inference(x_dim, h_dim, z_dim)
+        # Variational model
+        self.encoder = Inference(x_dim, h_dim, z_dim)
 
-    # Loss
-    ce = pxl.CrossEntropy(encoder, decoder)
-    kl = pxl.KullbackLeibler(encoder, prior)
-    loss = (ce + kl).mean()
+        # Loss
+        ce = pxl.CrossEntropy(self.encoder, self.decoder)
+        kl = pxl.KullbackLeibler(self.encoder, self.prior)
+        loss = (ce + kl).mean()
 
-    # Model
-    vae = pxm.Model(loss, distributions=[encoder, decoder])
+        # Init
+        super().__init__(loss, distributions=[self.encoder, self.decoder])
 
-    return vae, (prior, decoder, encoder)
+    def reconstruction(self, x):
+        with torch.no_grad():
+            z = self.encoder.sample({"x": x}, return_all=False)
+            x_recon = self.decoder.sample_mean(z)
+
+        return x_recon
+
+    def sample(self, sample_num):
+        with torch.no_grad():
+            z_sample = self.prior.sample(batch_n=sample_num)
+            x_sample = self.decoder.sample_mean({"z": z_sample["z"]})
+
+        return x_sample
 
 
 if __name__ == "__main__":
@@ -74,22 +87,16 @@ if __name__ == "__main__":
     h_dim = 5
     x = torch.randn(10, x_dim)
 
-    vae, sampler = load_vae_model(x_dim, z_dim, h_dim)
+    vae = VAE(x_dim, z_dim, h_dim)
 
     # Training
     for _ in range(3):
         vae.train({"x": x})
 
     # Reconstruction
-    with torch.no_grad():
-        prior, p, q = sampler
-        z = q.sample({"x": x}, return_all=False)
-        x_recon = p.sample_mean(z)
-        print(x_recon.size(), x_recon[0])
+    x_recon = vae.reconstruction(x)
+    print(x_recon.size(), x_recon[0])
 
     # Sample from latent
-    with torch.no_grad():
-        prior, p, q = sampler
-        z_sample = prior.sample(batch_n=100)
-        x_sample = p.sample_mean({"z": z_sample["z"]})
-        print(x_sample.size(), x_sample[0])
+    x_sample = vae.sample(1)
+    print(x_sample.size(), x_sample[0])

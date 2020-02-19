@@ -73,12 +73,16 @@ class VAE(pxm.Model):
 
         return x_recon
 
-    def sample(self, sample_num):
+    def sample(self, sample_num, return_all=False):
         with torch.no_grad():
-            z_sample = self.prior.sample(batch_n=sample_num)
-            x_sample = self.decoder.sample_mean({"z": z_sample["z"]})
+            z_sample_dict = self.prior.sample(batch_n=sample_num)
+            x_sample = self.decoder.sample_mean(z_sample_dict)
 
-        return x_sample
+        sample = {"x": x_sample}
+        if return_all:
+            sample.update(z_sample_dict)
+
+        return sample
 
 
 if __name__ == "__main__":
@@ -98,5 +102,6 @@ if __name__ == "__main__":
     print(x_recon.size(), x_recon[0])
 
     # Sample from latent
-    x_sample = vae.sample(1)
-    print(x_sample.size(), x_sample[0])
+    sample = vae.sample(1, return_all=True)
+    print(sample["x"].size(), sample["x"][0])
+    print(sample["z"].size(), sample["z"][0])

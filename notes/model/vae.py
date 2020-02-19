@@ -66,12 +66,16 @@ class VAE(pxm.Model):
         # Init
         super().__init__(loss, distributions=[self.encoder, self.decoder])
 
-    def reconstruction(self, x):
+    def reconstruction(self, x, return_all=False):
         with torch.no_grad():
             z = self.encoder.sample({"x": x}, return_all=False)
             x_recon = self.decoder.sample_mean(z)
 
-        return x_recon
+        sample = {"x": x_recon}
+        if return_all:
+            sample.update(z)
+
+        return sample
 
     def sample(self, sample_num, return_all=False):
         with torch.no_grad():
@@ -98,8 +102,9 @@ if __name__ == "__main__":
         vae.train({"x": x})
 
     # Reconstruction
-    x_recon = vae.reconstruction(x)
-    print(x_recon.size(), x_recon[0])
+    recon = vae.reconstruction(x, return_all=True)
+    print(recon["z"].size(), recon["z"][0])
+    print(recon["x"].size(), recon["x"][0])
 
     # Sample from latent
     sample = vae.sample(1, return_all=True)
